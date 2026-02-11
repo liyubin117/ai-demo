@@ -10,6 +10,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.rick.milvus.base.Common.initClient;
+
 public class DbOperation {
     public static void main(String[] args) throws InterruptedException {
         createDb("rick_db");
@@ -22,14 +24,6 @@ public class DbOperation {
         initClient().useDatabase("rick_db"); // 在不断开与 Milvus 连接的情况下从一个数据库切换到另一个数据库
 
         dropDb("rick_db");
-    }
-
-    public static MilvusClientV2 initClient() {
-        ConnectConfig config = ConnectConfig.builder()
-                .uri("http://localhost:19530")
-                .token("root:Milvus")
-                .build();
-        return new MilvusClientV2(config);
     }
 
     public static void createDb(String db) {
