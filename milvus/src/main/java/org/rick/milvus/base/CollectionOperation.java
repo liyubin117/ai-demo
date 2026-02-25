@@ -7,6 +7,11 @@ import io.milvus.v2.common.IndexParam;
 import io.milvus.v2.service.collection.request.*;
 import io.milvus.v2.service.collection.response.DescribeCollectionResp;
 import io.milvus.v2.service.collection.response.ListCollectionsResp;
+import io.milvus.v2.service.partition.request.HasPartitionReq;
+import io.milvus.v2.service.partition.request.ListPartitionsReq;
+import io.milvus.v2.service.partition.request.LoadPartitionsReq;
+import io.milvus.v2.service.partition.request.ReleasePartitionsReq;
+import org.apache.commons.lang3.StringUtils;
 
 import java.util.*;
 
@@ -14,22 +19,36 @@ import static org.rick.milvus.base.Common.initClient;
 
 public class CollectionOperation {
     public static void main(String[] args) {
+        // 创建集合并加载
         createCollection("rick_db", "rick_collection_dynamic_field");
         loadCollection("rick_db", "rick_collection_dynamic_field");
-        System.out.println(getCollectionLoadState("rick_db", "rick_collection_dynamic_field"));
+        System.out.println("[加载状态] rick_collection_dynamic_field: " + getCollectionLoadState("rick_db", "rick_collection_dynamic_field", null));
         releaseLoad("rick_db", "rick_collection_dynamic_field");
-        System.out.println(getCollectionLoadState("rick_db", "rick_collection_dynamic_field"));
+        System.out.println("[释放后加载状态] rick_collection_dynamic_field: " + getCollectionLoadState("rick_db", "rick_collection_dynamic_field", null));
 
+        // 默认数据库操作
         createCollection("default", "collection1");
+        System.out.println("[集合名称列表]: ");
         getCollectionNames().forEach(System.out::println);
+        System.out.println("[分区列表] collection1: ");
+        getCollectionPartitions("default", "collection1").forEach(System.out::println);
+        System.out.println("[是否存在默认分区] collection1._default: " + isCollectionPartitionExisted("default", "collection1", "_default"));
+        System.out.println("[加载状态] collection1._default: " + getCollectionLoadState("default", "collection1", "_default"));
+        loadCollectionPartition("default", "collection1", "_default");
+        System.out.println("[加载后状态] collection1._default: " + getCollectionLoadState("default", "collection1", "_default"));
+        releasePartitionLoad("default", "collection1", "_default");
+        System.out.println("[释放后状态] collection1._default: " + getCollectionLoadState("default", "collection1", "_default"));
 
-        System.out.println(descCollection());
+        // 集合描述和修改
+        System.out.println("[集合描述] collection1: " + descCollection());
         alterCollection("default", "collection1");
-        System.out.println(descCollection());
+        System.out.println("[修改后集合描述] collection1: " + descCollection());
 
+        // 删除和重命名集合
         dropCollection("default", "collection_new");
         dropCollection("rick_db", "rick_collection_dynamic_field");
         renameCollection("collection1", "collection_new");
+        System.out.println("[重命名后集合列表]: ");
         getCollectionNames().forEach(System.out::println);
     }
 
@@ -99,7 +118,7 @@ public class CollectionOperation {
                 .numShards(3) // 设置分片数
                 .property(Constant.MMAP_ENABLED, "true") // 启用mmap，默认true。允许 Milvus 将原始字段数据映射到内存中，而不是完全加载它们。这样可以减少内存占用，提高 Collections 的容量
                 .property(Constant.TTL_SECONDS, "86400") // 一旦 TTL 超时，Milvus 就会删除 Collection 中的实体。删除是异步的，这表明在删除完成之前，搜索和查询仍然可以进行
-                .consistencyLevel(ConsistencyLevel.EVENTUALLY) // 为集合中的搜索和查询设置一致性级别
+                .consistencyLevel(ConsistencyLevel.EVENTUALLY) // 为集合中的搜索和查询设置一致性级别，按一致性严格程度从高到低依次是STRONG SESSION BOUNDED EVENTUALLY，严格程度取决于客户端设定的保证时间与服务端的服务时间的gap
                 .build();
 
         initClient().createCollection(customizedSetupReq1);
@@ -119,13 +138,15 @@ public class CollectionOperation {
         initClient().loadCollection(req);
     }
 
-    public static Boolean getCollectionLoadState(String db, String collection) {
-        GetLoadStateReq customSetupLoadStateReq1 = GetLoadStateReq.builder()
+    public static Boolean getCollectionLoadState(String db, String collection, String part) {
+        GetLoadStateReq.GetLoadStateReqBuilder reqBuilder = GetLoadStateReq.builder()
                 .databaseName(db)
                 .collectionName(collection)
-                .build();
-
-        return initClient().getLoadState(customSetupLoadStateReq1);
+                ;
+        if (StringUtils.isNotEmpty(part)) {
+            reqBuilder.partitionName(part);
+        }
+        return initClient().getLoadState(reqBuilder.build());
     }
 
     public static void releaseLoad(String db, String collection) {
@@ -150,6 +171,47 @@ public class CollectionOperation {
                 .collectionName("collection1")
                 .build();
         return initClient().describeCollection(request);
+    }
+
+    /**
+     * 分区是一个 Collection 的子集。每个分区与其父集合共享相同的数据结构，但只包含集合中的一个数据子集
+     * 创建一个 Collection 时，Milvus 也会在该 Collection 中创建一个名为_default 的分区。如果不添加其他分区，所有插入到 Collections 中的实体都会进入默认分区，所有搜索和查询也都在默认分区内进行。
+     * 可以添加更多分区，并根据特定条件将实体插入其中。这样就可以限制在某些分区内进行搜索和查询，从而提高搜索性能。
+     * 一个 Collections 最多可以有 1,024 个分区。
+     */
+    public static List<String> getCollectionPartitions(String db, String collection) {
+        ListPartitionsReq req = ListPartitionsReq.builder()
+                .databaseName(db)
+                .collectionName(collection)
+                .build();
+        return initClient().listPartitions(req);
+    }
+
+    public static boolean isCollectionPartitionExisted(String db, String collection, String part) {
+        HasPartitionReq req = HasPartitionReq.builder()
+                .databaseName(db)
+                .collectionName(collection)
+                .partitionName(part)
+                .build();
+        return initClient().hasPartition(req);
+    }
+
+    public static void releasePartitionLoad(String db, String collection, String part) {
+        ReleasePartitionsReq releasePartitionsReq = ReleasePartitionsReq.builder()
+                .databaseName(db)
+                .collectionName(collection)
+                .partitionNames(Collections.singletonList(part))
+                .build();
+        initClient().releasePartitions(releasePartitionsReq);
+    }
+
+    public static void loadCollectionPartition(String db, String collection, String part) {
+        LoadPartitionsReq loadPartitionsReq = LoadPartitionsReq.builder()
+                .databaseName(db)
+                .collectionName(collection)
+                .partitionNames(Collections.singletonList(part))
+                .build();
+        initClient().loadPartitions(loadPartitionsReq);
     }
 
     public static void renameCollection(String srcName, String destName) {
