@@ -11,15 +11,21 @@ import io.milvus.v2.service.partition.request.HasPartitionReq;
 import io.milvus.v2.service.partition.request.ListPartitionsReq;
 import io.milvus.v2.service.partition.request.LoadPartitionsReq;
 import io.milvus.v2.service.partition.request.ReleasePartitionsReq;
+import io.milvus.v2.service.utility.request.CreateAliasReq;
+import io.milvus.v2.service.utility.request.DropAliasReq;
+import io.milvus.v2.service.utility.request.ListAliasesReq;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.*;
 
 import static org.rick.milvus.base.Common.initClient;
 
-public class CollectionOperation {
+public class CollectionDdl {
     public static void main(String[] args) {
-        // 创建集合并加载
+        /**
+         * 加载集合是在集合中进行相似性搜索和查询的前提
+         * 加载 Collections 时，Milvus 会将索引文件和所有字段的原始数据加载到内存中，以便快速响应搜索和查询。在载入 Collections 后插入的实体会自动编入索引并载入
+         */
         createCollection("rick_db", "rick_collection_dynamic_field");
         loadCollection("rick_db", "rick_collection_dynamic_field");
         System.out.println("[加载状态] rick_collection_dynamic_field: " + getCollectionLoadState("rick_db", "rick_collection_dynamic_field", null));
@@ -45,15 +51,32 @@ public class CollectionOperation {
         System.out.println("[修改后集合描述] collection1: " + descCollection());
 
         // 删除和重命名集合
-        dropCollection("default", "collection_new");
+        dropCollection("default", "collection_new"); // 需要collection对应的所有alias都删除以后才可以删掉
         dropCollection("rick_db", "rick_collection_dynamic_field");
         renameCollection("collection1", "collection_new");
         System.out.println("[重命名后集合列表]: ");
         getCollectionNames().forEach(System.out::println);
+
+        /**
+         * 别名是一个 Collection 的二级可变名称。使用别名提供了一个抽象层，可以在不修改应用程序代码的情况下动态切换 Collections。这对于生产环境中的无缝数据更新、A/B 测试和其他操作符特别有用
+         * 别名的关键属性：
+         *  一个 Collection 可以有多个别名。
+         *  一个别名一次只能指向一个 Collections。
+         *  处理请求时，Milvus 会首先检查是否存在提供名称的 Collection。如果不存在，它就会检查该名称是否是某个 Collection 的别名。
+         */
+        createAlias("default", "collection_new", "alias1");
+        System.out.println("[创建别名后别名列表] collection_new:");
+        getAliases("default", "collection_new").forEach(System.out::println);
+        dropAlias("alias1");
+        System.out.println("[删除别名后别名列表] collection_new:");
+        getAliases("default", "collection_new").forEach(System.out::println);
     }
 
     public static CreateCollectionReq.CollectionSchema createSchema() {
-        // 3.1 Create schema
+        /**
+         * Schema 定义了 Collections 的数据结构，规定如何组织 Collection 中的数据
+         * 有一个主键、至少一个向量字段和几个标量字段
+         */
         CreateCollectionReq.CollectionSchema schema = CreateCollectionReq.CollectionSchema.builder()
                 /**
                  * 启用动态字段
@@ -63,18 +86,51 @@ public class CollectionOperation {
                 .enableDynamicField(true)
                 .build();
 
-        // 3.2 Add fields to schema
+        // 必须有一个主键，不可为空
         schema.addField(AddFieldReq.builder()
                 .fieldName("my_id")
-                .dataType(DataType.Int64)
+                .dataType(DataType.Int64) // 主键只接受Int64或VarChar值
                 .isPrimaryKey(true)
                 .autoID(true)
                 .build());
 
+        /**
+         * 密集向量由包含实数的数组组成，其中大部分或所有元素都不为零。广泛用于语义搜索、推荐系统
+         * 与稀疏向量相比，密集向量在同一维度上包含更多信息，因为每个维度都持有有意义的值。这种表示方法能有效捕捉复杂的模式和关系，使数据在高维空间中更容易分析和处理。
+         * 密集向量通常有固定的维数，从几十到几百甚至上千不等，具体取决于具体的应用和要求。
+         */
         schema.addField(AddFieldReq.builder()
                 .fieldName("my_vector")
                 .dataType(DataType.FloatVector)
                 .dimension(5)
+                .build());
+
+        /**
+         * 二进制向量将传统的高维浮点向量转换为只包含 0 和 1 的二进制向量
+         * 不仅压缩了向量的大小，还降低了存储和计算成本，同时部分保留了语义信息。当对非关键特征的精度要求不高时，二进制向量可以有效保持原始浮点向量的大部分完整性和实用性
+         *  在文本处理中，可以使用预定义的词汇表，根据词的存在设置相应的位。
+         *  在图像处理中，感知哈希算法（如pHash）可以生成图像的二进制特征。
+         *  在机器学习应用中，可对模型输出进行二进制化，以获得二进制向量表示。
+         */
+        schema.addField(AddFieldReq.builder()
+                .fieldName("my_binary_vector")
+                .dataType(DataType.BinaryVector)
+                .dimension(90)
+                .build());
+
+        /**
+         * 稀疏向量是一种特殊的高维向量，其中大部分元素为零，只有少数维度的值不为零
+         * 因此只存储非零元素及其维度的索引，通常以{ index: value} 的键值对表示（如[{2: 0.2}, ..., {9997: 0.5}, {9999: 0.7}] ）
+         */
+        schema.addField(AddFieldReq.builder()
+                .fieldName("sparse_vector")
+                .dataType(DataType.SparseFloatVector)
+                .build());
+        schema.addField(AddFieldReq.builder()
+                .fieldName("text")
+                .dataType(DataType.VarChar)
+                .maxLength(65535)
+                .enableAnalyzer(true)
                 .build());
 
         schema.addField(AddFieldReq.builder()
@@ -82,6 +138,29 @@ public class CollectionOperation {
                 .dataType(DataType.VarChar)
                 .maxLength(512)
 //                .isPartitionKey(true)
+                .build());
+
+        schema.addField(AddFieldReq.builder()
+                .fieldName("my_int64")
+                .dataType(DataType.Int64)
+                .build());
+
+        schema.addField(AddFieldReq.builder()
+                .fieldName("my_bool")
+                .dataType(DataType.Bool)
+                .build());
+
+        schema.addField(AddFieldReq.builder()
+                .fieldName("my_json")
+                .dataType(DataType.JSON)
+                .build());
+
+        schema.addField(AddFieldReq.builder()
+                .fieldName("my_array")
+                .dataType(DataType.Array)
+                .elementType(DataType.VarChar)
+                .maxCapacity(5)
+                .maxLength(512)
                 .build());
 
         return schema;
@@ -124,10 +203,6 @@ public class CollectionOperation {
         initClient().createCollection(customizedSetupReq1);
     }
 
-    /**
-     * 加载集合是在集合中进行相似性搜索和查询的前提
-     * 加载 Collections 时，Milvus 会将索引文件和所有字段的原始数据加载到内存中，以便快速响应搜索和查询。在载入 Collections 后插入的实体会自动编入索引并载入
-     */
     public static void loadCollection(String db, String collection) {
         LoadCollectionReq req = LoadCollectionReq.builder()
                 .databaseName(db)
@@ -266,5 +341,29 @@ public class CollectionOperation {
                 .build();
 
         initClient().dropCollection(dropQuickSetupParam);
+    }
+
+    public static void createAlias(String db, String collection, String alias) {
+        CreateAliasReq createAliasReq = CreateAliasReq.builder()
+                .databaseName(db)
+                .collectionName(collection)
+                .alias(alias)
+                .build();
+        initClient().createAlias(createAliasReq);
+    }
+
+    public static List<String> getAliases(String db, String collection) {
+        ListAliasesReq listAliasesReq = ListAliasesReq.builder()
+                .databaseName(db)
+                .collectionName(collection)
+                .build();
+        return initClient().listAliases(listAliasesReq).getAlias();
+    }
+
+    public static void dropAlias(String alias) {
+        DropAliasReq dropAliasReq = DropAliasReq.builder()
+                .alias(alias)
+                .build();
+        initClient().dropAlias(dropAliasReq);
     }
 }
