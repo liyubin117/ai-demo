@@ -38,10 +38,7 @@ public class DbOperation {
     }
 
     public static DescribeDatabaseResp showDb(String db) {
-        MilvusClientV2 client = initClient();
-        ListDatabasesResp listDatabasesResp = client.listDatabases();
-
-        DescribeDatabaseResp descDBResp = client.describeDatabase(DescribeDatabaseReq.builder()
+        DescribeDatabaseResp descDBResp = initClient().describeDatabase(DescribeDatabaseReq.builder()
                 .databaseName(db)
                 .build());
         return descDBResp;

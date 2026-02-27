@@ -9,6 +9,11 @@ public class Common {
                 .uri("http://localhost:19530")
                 .token("root:Milvus")
                 .build();
-        return new MilvusClientV2(config);
+        MilvusClientV2 client = new MilvusClientV2(config);
+
+        // 添加 JVM 关闭钩子，确保程序退出时释放资源
+        Runtime.getRuntime().addShutdownHook(new Thread(client::close));
+
+        return client;
     }
 }

@@ -46,9 +46,9 @@ public class CollectionDdl {
         System.out.println("[释放后状态] collection1._default: " + getCollectionLoadState("default", "collection1", "_default"));
 
         // 集合描述和修改
-        System.out.println("[集合描述] collection1: " + descCollection());
+        System.out.println("[集合描述] collection1: " + descCollection("default", "collection1"));
         alterCollection("default", "collection1");
-        System.out.println("[修改后集合描述] collection1: " + descCollection());
+        System.out.println("[修改后集合描述] collection1: " +  descCollection("default", "collection1"));
 
         // 删除和重命名集合
         dropCollection("default", "collection_new"); // 需要collection对应的所有alias都删除以后才可以删掉
@@ -115,7 +115,7 @@ public class CollectionDdl {
         schema.addField(AddFieldReq.builder()
                 .fieldName("my_binary_vector")
                 .dataType(DataType.BinaryVector)
-                .dimension(90)
+                .dimension(128)
                 .build());
 
         /**
@@ -138,6 +138,14 @@ public class CollectionDdl {
                 .dataType(DataType.VarChar)
                 .maxLength(512)
 //                .isPartitionKey(true)
+                .build());
+
+        schema.addField(AddFieldReq.builder()
+                .fieldName("varchar_field1")
+                .dataType(DataType.VarChar)
+                .maxLength(100)
+                .isNullable(true)
+                .defaultValue("Unknown")
                 .build());
 
         schema.addField(AddFieldReq.builder()
@@ -180,9 +188,28 @@ public class CollectionDdl {
                 .metricType(IndexParam.MetricType.COSINE)
                 .build();
 
+        IndexParam indexParamForBinaryVectorField = IndexParam.builder()
+                .fieldName("my_binary_vector")
+                .indexType(IndexParam.IndexType.AUTOINDEX) // 旨在平滑向量搜索的学习曲线
+                .metricType(IndexParam.MetricType.HAMMING) // 使用汉明距离作为距离度量
+                .build();
+        Map<String,Object> extraParams = new HashMap<>();
+
+        extraParams.put("inverted_index_algo", "DAAT_MAXSCORE"); // Algorithm used for building and querying the index
+        IndexParam indexParamForSparseVectorField = IndexParam.builder()
+                .fieldName("sparse_vector")
+                .indexName("sparse_inverted_index")
+                .indexType(IndexParam.IndexType.SPARSE_INVERTED_INDEX)
+                .metricType(IndexParam.MetricType.IP)
+                .extraParams(extraParams)
+                .build();
+
         List<IndexParam> indexParams = new ArrayList<>();
         indexParams.add(indexParamForIdField);
         indexParams.add(indexParamForVectorField);
+        indexParams.add(indexParamForBinaryVectorField);
+        indexParams.add(indexParamForSparseVectorField);
+
 
         return indexParams;
     }
@@ -241,9 +268,10 @@ public class CollectionDdl {
         return resp.getCollectionNames();
     }
 
-    public static DescribeCollectionResp descCollection() {
+    public static DescribeCollectionResp descCollection(String db, String collection) {
         DescribeCollectionReq request = DescribeCollectionReq.builder()
-                .collectionName("collection1")
+                .databaseName(db)
+                .collectionName(collection)
                 .build();
         return initClient().describeCollection(request);
     }
