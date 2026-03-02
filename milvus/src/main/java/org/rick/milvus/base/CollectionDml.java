@@ -38,21 +38,22 @@ public class CollectionDml {
         // upsert需要手动指定主键，且需要schema的autoID为false
         upsert("default", "dml", "_default");
 
-        System.out.println("[密集向量搜索结果]: " + search("default", "dml", "product_id", "embedding", new FloatVec(new float[]{0.1f, 0.3f, 0.3f, 0.4f})));
+        System.out.println("[密集向量搜索结果]: " + search("default", "dml", "product_id", "embedding", new FloatVec(new float[]{0.1f, 0.3f, 0.3f, 0.4f}), ""));
+        System.out.println("[过滤出PROD-001后的搜索结果]: " + search("default", "dml", "product_id", "embedding", new FloatVec(new float[]{0.1f, 0.3f, 0.3f, 0.4f}), "product_id in ['PROD-001']"));
 
         boolean[] boolArray = {true, false, false, true, true, false, true, true, false, true, false, false, true, true, false, true};
         BinaryVec queryVector = new BinaryVec(convertBoolArrayToBytes(boolArray));
-        System.out.println("[二进制向量搜索结果]: " + search("default", "dml", "product_id", "binary_vector", queryVector));
+        System.out.println("[二进制向量搜索结果]: " + search("default", "dml", "product_id", "binary_vector", queryVector, ""));
 
         SortedMap<Long, Float> sparse = new TreeMap<>();
         sparse.put(1L, 0.2f);
         sparse.put(50L, 0.4f);
         sparse.put(1000L, 0.7f);
         SparseFloatVec sparseFloatVec = new SparseFloatVec(sparse);
-        System.out.println("[稀疏向量搜索结果]: " + search("default", "dml", "product_id", "sparse_vector", sparseFloatVec));
+        System.out.println("[稀疏向量搜索结果]: " + search("default", "dml", "product_id", "sparse_vector", sparseFloatVec, ""));
 
         delete("default", "dml", "", Arrays.asList("PROD-001"), "_default");
-        System.out.println("[密集向量搜索结果]: " + search("default", "dml", "product_id", "embedding", new FloatVec(new float[]{0.1f, 0.3f, 0.3f, 0.4f})));
+        System.out.println("[删除PROD-001后，密集向量搜索结果]: " + search("default", "dml", "product_id", "embedding", new FloatVec(new float[]{0.1f, 0.3f, 0.3f, 0.4f}), ""));
 
     }
 
@@ -231,20 +232,26 @@ public class CollectionDml {
         return initClient().delete(reqBuilder.build());
     }
 
-    public static SearchResp search(String db, String collection, String key, String annsField, BaseVector queryVector) {
+    public static SearchResp search(String db, String collection, String key, String annsField, BaseVector queryVector, String filter) {
         Map<String, Object> searchParams = new HashMap<>();
         searchParams.put("nprobe", 10); // 用于控制相似最近邻搜索的精度
         searchParams.put("drop_ratio_search", 0.2); // 用于控制在近似最近邻搜索（ANN）过程中跳过部分数据的比例，以提高搜索效率，但可能会略微降低精度
 
-        SearchResp searchR = initClient().search(SearchReq.builder()
+        SearchReq. SearchReqBuilder reqBuilder = SearchReq.builder()
                 .databaseName(db)
                 .collectionName(collection)
-                .data(Collections.singletonList(queryVector))
-                .annsField(annsField)
                 .searchParams(searchParams)
-                .topK(2)
-                .outputFields(Arrays.asList(key, annsField))
-                .build());
+                .topK(2);
+
+        if (StringUtils.isNotEmpty(annsField) && queryVector != null) {
+            reqBuilder.data(Collections.singletonList(queryVector))
+                    .annsField(annsField)
+                    .outputFields(Arrays.asList(key, annsField));
+        }
+
+        if (StringUtils.isNotEmpty(filter)) reqBuilder.filter(filter);
+
+        SearchResp searchR = initClient().search(reqBuilder.build());
         return searchR;
     }
 
