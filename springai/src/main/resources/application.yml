@@ -5,7 +5,7 @@ server:
 spring:
   ai:
     deepseek:
-      api-key: ${API_KEY}
+      api-key: ${API_KEY}  #在IDE run configuration加上环境变量
       base-url: https://api.deepseek.com/v1
       chat:
         options:
