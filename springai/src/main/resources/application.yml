@@ -1,0 +1,13 @@
+server:
+  servlet:
+    context-path: /ai
+
+spring:
+  ai:
+    deepseek:
+      api-key: ${API_KEY}
+      base-url: https://api.deepseek.com/v1
+      chat:
+        options:
+#          model: deepseek-reasoner
+          model: deepseek-chat
